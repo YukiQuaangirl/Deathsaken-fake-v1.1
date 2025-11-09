@@ -1,0 +1,539 @@
+--[[  
+    💀 Deathsaken Hub v1.1 Full (ready-to-use)
+    by ngkhai & yukiquan (assembled)
+    Note: Test in private server first.
+]]  
+
+-- ⚙️ Load Rayfield
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- 🪩 Window Settings
+local Window = Rayfield:CreateWindow({
+    Name = "Deathsaken",
+    Icon = 18760709024,
+    LoadingTitle = "Loading Deathsaken...",
+    LoadingSubtitle = "by ngkhai and yukiquan",
+    ShowText = "deathsaken",
+    Theme = "Default",
+    ToggleUIKeybind = "K",
+    DisableRayfieldPrompts = false,
+    DisableBuildWarnings = false,
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "DeathsakenHub",
+        FileName = "Deathsaken Hub"
+    },
+    Discord = {
+        Enabled = true,
+        Invite = "dsc.gg/Deathsaken",
+        RememberJoins = true
+    },
+    KeySystem = true,
+    KeySettings = {
+        Title = "Deathsaken Key-System",
+        Subtitle = "Deathsaken Key System",
+        Note = "(dsc.gg/Deathsaken) - Join our discord right now",
+        FileName = "Deathsakenkey",
+        SaveKey = true,
+        GrabKeyFromSite = false,
+        Key = {"1000MEMBERS", "yukiquan", "SIGMASAKEN", "deathsaken", "guests", "Ngkhai", "forsaken"}
+    }
+})
+
+-- 🧱 Tabs
+local Main = Window:CreateTab("Main", 4483362458)
+local Combat = Window:CreateTab("Combat", 4483362458)
+local Visual = Window:CreateTab("Visuals", 4483362458)
+local Miscs = Window:CreateTab("Misc", 4483362458)
+local AntiSlows = Window:CreateTab("Anti-Slows", 4483362458)
+local Aimbot = Window:CreateTab("Aimbot", 4483362458)
+local AchieveTab = Window:CreateTab("Achievements", 4483362458)
+
+-- Services & core refs
+local Players = game:GetService("Players")
+local lp = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local RemoteEvent = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Network"):WaitForChild("RemoteEvent")
+local workspacePlayers = workspace:WaitForChild("Players")
+local Survivors = workspacePlayers:WaitForChild("Survivors")
+local KillersFolder = workspacePlayers:WaitForChild("Killers")
+local Camera = workspace.CurrentCamera
+
+-- Helper safe-wait
+local function safeWaitFor(parent, name, timeout)
+    timeout = timeout or 5
+    local ok, inst = pcall(function()
+        return parent:WaitForChild(name, timeout)
+    end)
+    return ok and inst or nil
+end
+
+---------------------------------------------------------------------
+-- MAIN: Auto Generator (full working)
+---------------------------------------------------------------------
+Main:CreateSection("Generator")
+local genEnabled = false
+local genInterval = 1.25
+local re = true
+local Check = false
+local lt = 0
+
+Main:CreateToggle({
+    Name = "Auto Do Generator",
+    CurrentValue = genEnabled,
+    Flag = "AutoGenToggle",
+    Callback = function(Value) genEnabled = Value end,
+})
+Main:CreateSlider({
+    Name = "Do Generator Interval (Seconds)",
+    Range = {1, 15},
+    Increment = 0.25,
+    Suffix = "s",
+    CurrentValue = genInterval,
+    Flag = "GenIntervalSlider",
+    Callback = function(Value) genInterval = Value end,
+})
+
+-- Hook RF/RE to detect enter/leave generator and remote cooldown
+do
+    local OldNamecall
+    OldNamecall = hookmetamethod(game, "__namecall", function(Self, ...)
+        local Args = {...}
+        local Method = getnamecallmethod()
+        if not checkcaller() and typeof(Self) == "Instance" then
+            if Method == "InvokeServer" or Method == "FireServer" then
+                -- RF/RE are usually custom remote objects; compare by Name if available
+                if tostring(Self) == "RF" then
+                    if Args[1] == "enter" then
+                        Check = true
+                    elseif Args[1] == "leave" then
+                        Check = false
+                    end
+                elseif tostring(Self) == "RE" then
+                    lt = os.clock()
+                end
+            end
+        end
+        return OldNamecall(Self, unpack(Args))
+    end)
+end
+
+RunService.Stepped:Connect(function()
+    if genEnabled and Check and re and os.clock() - lt >= genInterval then
+        re = false
+        task.spawn(function()
+            local ok, mapRoot = pcall(function()
+                return workspace:WaitForChild("Map"):WaitForChild("Ingame"):WaitForChild("Map")
+            end)
+            if ok and mapRoot then
+                for _, gen in ipairs(mapRoot:GetChildren()) do
+                    if gen.Name == "Generator" and gen:FindFirstChild("Remotes") and gen.Remotes:FindFirstChild("RE") then
+                        pcall(function() gen.Remotes.RE:FireServer() end)
+                    end
+                end
+            end
+            task.wait(genInterval)
+            re = true
+        end)
+    end
+end)
+
+---------------------------------------------------------------------
+-- COMBAT TAB: Invisible, Anti-Blindness, CoinFlip, Charge, TwoTime, AutoBlock/Punch
+-- (NO Walkspeed override, NO controller Noli shoot)
+---------------------------------------------------------------------
+Combat:CreateSection("Invisible Effect")
+-- genv used by invisible logic (from earlier snippets)
+local genv = {}
+genv.running = false
+genv.animTrack = nil
+genv.toggleValue = false
+
+-- helper: get character & humanoid safely
+function genv.getCharacterHumanoid()
+    local character = Players.LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    return character, humanoid
+end
+function genv.getAnimator(humanoid)
+    if not humanoid then return nil end
+    local animator = humanoid:FindFirstChildOfClass("Animator")
+    if not animator then
+        animator = Instance.new("Animator")
+        animator.Parent = humanoid
+    end
+    return animator
+end
+
+-- Handle toggle logic
+function genv.handleToggle(enabled)
+    genv.running = enabled
+    if not enabled and genv.animTrack then
+        genv.animTrack:Stop()
+        genv.animTrack = nil
+    end
+    local character = genv.getCharacterHumanoid()
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        rootPart.Transparency = enabled and 0.4 or 1
+    end
+end
+
+-- UpdateToggle: check Survivor equipped etc. (simplified)
+local playerData = safeWaitFor(lp, "PlayerData", 5)
+local survivorEquippedValue = playerData and safeWaitFor(playerData:WaitForChild("Equipped"), "Survivor", 5)
+function genv.updateToggle()
+    local character, humanoid = genv.getCharacterHumanoid()
+    local isTarget = false
+    if survivorEquippedValue then
+        local v = survivorEquippedValue.Value
+        if (v == "007n7" or v == "Noob" or v == "TwoTime") and humanoid and humanoid.MaxHealth < 300 then
+            isTarget = true
+        end
+    end
+    genv.handleToggle(isTarget)
+end
+
+Combat:CreateToggle({
+    Name = "Fully Invisible (Invisible Effect)",
+    CurrentValue = false,
+    Flag = "InvisibleToggle",
+    Callback = function(Value)
+        genv.toggleValue = Value
+        if Value then
+            genv.updateToggle()
+        else
+            genv.handleToggle(false)
+        end
+    end
+})
+
+-- Update on survivor change & respawn
+if survivorEquippedValue then
+    survivorEquippedValue:GetPropertyChangedSignal("Value"):Connect(function()
+        if genv.toggleValue then genv.updateToggle() end
+    end)
+end
+Players.LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.1)
+    if genv.toggleValue then genv.updateToggle() end
+end)
+
+-- Heartbeat loop controlling animation/transparency
+RunService.Heartbeat:Connect(function()
+    if not genv.running then return end
+    local character, humanoid = genv.getCharacterHumanoid()
+    if not character or not humanoid then return end
+    local animator = genv.getAnimator(humanoid)
+    local torso = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    local statusContainer = lp:FindFirstChild("PlayerGui") and lp.PlayerGui:FindFirstChild("MainUI") and lp.PlayerGui.MainUI:FindFirstChild("StatusContainer")
+    local status = statusContainer and statusContainer:FindFirstChild("Invisibility")
+    if humanoid.MaxHealth < 300 and torso and torso.Transparency ~= 0 and status then
+        if not genv.animTrack or (genv.animTrack and not genv.animTrack.IsPlaying) then
+            local animation = Instance.new("Animation")
+            animation.AnimationId = "rbxassetid://75804462760596"
+            genv.animTrack = animator:LoadAnimation(animation)
+            genv.animTrack.Looped = true
+            genv.animTrack:Play(0)
+            genv.animTrack:AdjustSpeed(0)
+            genv.animTrack.TimePosition = 0
+            if rootPart then rootPart.Transparency = 0.4 end
+        end
+    else
+        if genv.animTrack and genv.animTrack.IsPlaying then
+            genv.animTrack:Stop(0)
+            genv.animTrack = nil
+            if rootPart then rootPart.Transparency = 1 end
+        end
+    end
+end)
+
+-- Anti Blindness (remove certain Lighting/Workspace effects)
+Combat:CreateSection("Blindness")
+do
+    getgenv().Lighting = Lighting
+    getgenv().Workspace = Workspace
+    getgenv().removeEffectsEnabled = false
+    getgenv().lightingConnection = nil
+    getgenv().workspaceConnection = nil
+    getgenv().lightingTargets = {"BlindnessBlur", "SubspaceVFXBlur", "SubspaceVFXColorCorrection"}
+    getgenv().workspaceTargets = {"GlitchParts"}
+    getgenv().removeLightingInstances = function()
+        for _, name in ipairs(getgenv().lightingTargets) do
+            local obj = getgenv().Lighting:FindFirstChild(name)
+            if obj then pcall(function() obj:Destroy() end) end
+        end
+    end
+    getgenv().removeWorkspaceInstances = function()
+        for _, name in ipairs(getgenv().workspaceTargets) do
+            local obj = getgenv().Workspace:FindFirstChild(name)
+            if obj then pcall(function() obj:Destroy() end) end
+        end
+    end
+    getgenv().enableRemoveEffects = function()
+        getgenv().removeLightingInstances()
+        getgenv().removeWorkspaceInstances()
+        if getgenv().lightingConnection then getgenv().lightingConnection:Disconnect() end
+        if getgenv().workspaceConnection then getgenv().workspaceConnection:Disconnect() end
+        getgenv().lightingConnection = getgenv().Lighting.ChildAdded:Connect(function(child)
+            if table.find(getgenv().lightingTargets, child.Name) then
+                pcall(function() child:Destroy() end)
+            end
+        end)
+        getgenv().workspaceConnection = getgenv().Workspace.ChildAdded:Connect(function(child)
+            if table.find(getgenv().workspaceTargets, child.Name) then
+                pcall(function() child:Destroy() end)
+            end
+        end)
+        getgenv().removeEffectsEnabled = true
+    end
+    getgenv().disableRemoveEffects = function()
+        if getgenv().lightingConnection then getgenv().lightingConnection:Disconnect(); getgenv().lightingConnection = nil end
+        if getgenv().workspaceConnection then getgenv().workspaceConnection:Disconnect(); getgenv().workspaceConnection = nil end
+        getgenv().removeEffectsEnabled = false
+    end
+end
+
+Combat:CreateToggle({
+ Name = "Anti Blindness",
+ CurrentValue = false,
+ Flag = "RemoveBlindness",
+ Callback = function(value)
+    if value then getgenv().enableRemoveEffects() else getgenv().disableRemoveEffects() end
+ end
+})
+
+-- Auto CoinFlip (use actor ability)
+Combat:CreateSection("Chance")
+local AutoCoinFlip = false
+local MaxCharges = 3
+local Delay = 0.25
+
+Combat:CreateToggle({
+    Name = "Auto CoinFlip",
+    CurrentValue = false,
+    Flag = "AutoCoinFlip",
+    Callback = function(value) AutoCoinFlip = value end
+})
+
+Combat:CreateSlider({
+    Name = "Charges",
+    Range = {1, 3},
+    Increment = 1,
+    Suffix = "charges",
+    CurrentValue = MaxCharges,
+    Flag = "MaxChargesSlider",
+    Callback = function(value) MaxCharges = value end
+})
+
+local function getRerollGui()
+    local success, gui = pcall(function()
+        return Players.LocalPlayer.PlayerGui:WaitForChild("MainUI",5):WaitForChild("AbilityContainer",5):WaitForChild("Reroll",5)
+    end)
+    return success and gui or nil
+end
+
+spawn(function()
+    while true do
+        local gui = getRerollGui()
+        if gui then
+            local chargesLabel = gui:FindFirstChild("Charges")
+            local currentCharges = chargesLabel and tonumber(chargesLabel.Text) or 0
+            if AutoCoinFlip and currentCharges < MaxCharges then
+                pcall(function()
+                    RemoteEvent:FireServer("UseActorAbility", "CoinFlip")
+                end)
+            end
+        end
+        task.wait(Delay)
+    end
+end)
+
+-- Charge Controller (Guest1337 dash handler)
+do
+    local lp = Players.LocalPlayer
+    local isChargeActive = false
+    local connection = nil
+    local DEFAULT_WALK_SPEED = 16
+    local ORIGINAL_DASH_SPEED = 50
+    local chargecontrol = true
+
+    local function setupCharacter(character)
+        local Humanoid = character:WaitForChild("Humanoid")
+        local HumanoidRootPart = character:WaitForChild("HumanoidRootPart")
+        _G.Humanoid = Humanoid
+        _G.HumanoidRootPart = HumanoidRootPart
+        DEFAULT_WALK_SPEED = Humanoid.WalkSpeed or DEFAULT_WALK_SPEED
+    end
+    if lp.Character then setupCharacter(lp.Character) end
+    lp.CharacterAdded:Connect(setupCharacter)
+
+    local function startCharge()
+        if isChargeActive then return end
+        isChargeActive = true
+        connection = RunService.RenderStepped:Connect(function()
+            if not _G.Humanoid or not _G.HumanoidRootPart then return end
+            _G.Humanoid.WalkSpeed = ORIGINAL_DASH_SPEED
+            _G.Humanoid.AutoRotate = false
+            local direction = _G.HumanoidRootPart.CFrame.LookVector
+            local horizontal = Vector3.new(direction.X, 0, direction.Z)
+            if horizontal.Magnitude > 0 then _G.Humanoid:Move(horizontal.Unit) end
+        end)
+    end
+    local function stopCharge()
+        if not isChargeActive then return end
+        isChargeActive = false
+        if _G.Humanoid then
+            _G.Humanoid.WalkSpeed = DEFAULT_WALK_SPEED
+            _G.Humanoid.AutoRotate = true
+            _G.Humanoid:Move(Vector3.new(0,0,0))
+        end
+        if connection then connection:Disconnect(); connection = nil end
+    end
+
+    RunService.RenderStepped:Connect(function()
+        if not chargecontrol then return end
+        if not lp.Character then return end
+        local speedMultipliers = lp.Character:FindFirstChild("SpeedMultipliers")
+        if speedMultipliers then
+            local charge = speedMultipliers:FindFirstChild("Guest1337Charge")
+            if charge then startCharge() else stopCharge() end
+        else
+            stopCharge()
+        end
+    end)
+
+    Combat:CreateSection("Guest 1337 -- Charge")
+    Combat:CreateToggle({
+        Name = "Charge Controller",
+        CurrentValue = false,
+        Flag = "ChargeControlToggle",
+        Callback = function(Value)
+            chargecontrol = Value
+            if not Value then stopCharge() end
+        end
+    })
+    Combat:CreateToggle({
+        Name = "Charge Ignore Objectables",
+        CurrentValue = false,
+        Flag = "IgnoreCharge",
+        Callback = function(Value)
+            if Value then getgenv().EnableCharge() else getgenv().DisableCharge() end
+        end
+    })
+end
+
+-- Two Time (Backstab) - simplified and functional
+do
+    Combat:CreateSection("Two Time")
+    local enabled = false
+    local range = 4
+    local mode = "Behind"
+    local cooldown = false
+    local lastTarget = nil
+    local daggerCooldownText = nil
+
+    -- refresh reference to dagger cooldown UI element
+    local function refreshDaggerRef()
+        local mainui = lp:FindFirstChild("PlayerGui") and lp.PlayerGui:FindFirstChild("MainUI")
+        if mainui and mainui:FindFirstChild("AbilityContainer") then
+            local dagger = mainui.AbilityContainer:FindFirstChild("Dagger")
+            if dagger and dagger:FindFirstChild("CooldownTime") then daggerCooldownText = dagger.CooldownTime; return end
+        end
+        daggerCooldownText = nil
+    end
+    lp.PlayerGui.DescendantAdded:Connect(function() refreshDaggerRef() end)
+    lp.PlayerGui.DescendantRemoving:Connect(function(obj) if obj == daggerCooldownText then daggerCooldownText = nil end end)
+    refreshDaggerRef()
+
+    Combat:CreateToggle({
+        Name = "Auto Backstab",
+        CurrentValue = false,
+        Flag = "BackstabEnabled",
+        Callback = function(value) enabled = value end
+    })
+    Combat:CreateSlider({
+        Name = "Range",
+        Range = {1, 20},
+        Increment = 1,
+        Suffix = "studs",
+        CurrentValue = range,
+        Flag = "BackstabRange",
+        Callback = function(value) range = value end
+    })
+    Combat:CreateDropdown({
+        Name = "Mode",
+        Options = {"Behind", "Around"},
+        CurrentOption = mode,
+        Flag = "BackstabMode",
+        Callback = function(option) mode = option end
+    })
+
+    local killerNames = { "Jason", "c00lkidd", "JohnDoe", "1x1x1x1", "Noli", "Slasher" } -- sample
+    local function isBehindTarget(hrp, targetHRP)
+        local distance = (hrp.Position - targetHRP.Position).Magnitude
+        if distance > range then return false end
+        if mode == "Around" then return true end
+        local direction = -targetHRP.CFrame.LookVector
+        local toPlayer = (hrp.Position - targetHRP.Position)
+        return toPlayer:Dot(direction) > 0.5
+    end
+
+    RunService.RenderStepped:Connect(function()
+        if not enabled or cooldown then return end
+        if not daggerCooldownText or (tonumber(daggerCooldownText.Text) ~= nil) then return end
+        local char = lp.Character
+        if not (char and char:FindFirstChild("HumanoidRootPart")) then return end
+        local hrp = char.HumanoidRootPart
+        for _, name in ipairs(killerNames) do
+            local killer = KillersFolder:FindFirstChild(name)
+            if killer and killer:FindFirstChild("HumanoidRootPart") then
+                local kHRP = killer.HumanoidRootPart
+                if isBehindTarget(hrp, kHRP) and killer ~= lastTarget then
+                    cooldown = true
+                    lastTarget = killer
+                    -- align & use Dagger
+                    local start = tick()
+                    local didDagger = false
+                    local conn
+                    conn = RunService.Heartbeat:Connect(function()
+                        if not (char and char.Parent and kHRP and kHRP.Parent) then conn:Disconnect(); return end
+                        if tick() - start >= 0.6 then conn:Disconnect(); return end
+                        -- predict basic: use kHRP.Position
+                        local targetPos = kHRP.Position - (kHRP.CFrame.LookVector * 0.3)
+                        hrp.CFrame = CFrame.new(targetPos, targetPos + kHRP.CFrame.LookVector)
+                        if not didDagger then
+                            didDagger = true
+                            pcall(function() RemoteEvent:FireServer("UseActorAbility", "Dagger") end)
+                        end
+                    end)
+                    task.delay(1.5, function()
+                        while isBehindTarget(hrp, kHRP) do RunService.Heartbeat:Wait() end
+                        lastTarget = nil
+                        cooldown = false
+                    end)
+                    break
+                end
+            end
+        end
+    end)
+end
+
+-- Auto Block & Auto Punch (basic workable implementation)
+do
+    Combat:CreateSection("Guest 1337 - Auto Block/Punch")
+    local autoBlockOn = false
+    local autoPunchOn = false
+    local detectionRange = 18
+    local facingCheckEnabled = true
+    local looseFacing = true
+
+    Combat:CreateToggle({
+        Name = "Auto Block",
+        CurrentValue = false,
+        Flag = "AutoBlockToggle",
+        Callback = function(Value
